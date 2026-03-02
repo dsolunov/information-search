@@ -1,6 +1,7 @@
 #include <bits/stdc++.h>
 #include <roaring/roaring.hh>
-#include <oleander/stemming.h>
+#include <unordered_set>
+#include <oleander/english_stem.h>
 #include <lsm.h>
 
 std::string RoaringBitmapToString(const roaring::Roaring& bitmap) {
@@ -47,11 +48,30 @@ public:
 };
 
 class TokenNormalizer {
+private:
+    stemming::english_stem<> english_stemmer;
+    const std::unordered_set<std::string> stop_words = {
+        "a", "an", "the", "is", "are", "was", "were",
+        "in", "on", "at", "of", "for", "to", "by"
+    };
+
 public:
     std::string operator()(const std::string& token) {
-        std::string res_token = token;
-        for (char& c : res_token) {
+        std::string lower_token = token;
+        for (char& c : lower_token) {
             c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        }
+        std::wstring token_stemming;
+        for (unsigned char c : lower_token) {
+            token_stemming += static_cast<wchar_t>(c);
+        }
+        english_stemmer(token_stemming);
+        std::string res_token;
+        for (wchar_t wc : token_stemming) {
+            res_token += static_cast<char>(wc);
+        }
+        if (stop_words.find(lower_token) != stop_words.end()) {
+            return "";
         }
         return res_token;
     }
@@ -60,7 +80,10 @@ public:
         std::vector<std::string> result_tokens;
         result_tokens.reserve(tokens.size());
         for (const std::string& token : tokens) {
-            result_tokens.push_back(this->operator()(token));
+            std::string normalized_token = this->operator()(token);
+            if (!normalized_token.empty()) {
+                result_tokens.push_back(normalized_token);
+            }
         }
         return result_tokens;
     }
@@ -121,7 +144,11 @@ public:
     }
 
     roaring::Roaring SearchWord(const std::string& word) {
-        auto it = index.find(normalizer(word));
+        std::string normalized_token = normalizer(word);
+        if (normalized_token.empty()) {
+            return roaring::Roaring{};
+        }
+        auto it = index.find(normalized_token);
         if (it == index.end()) {
             return roaring::Roaring{};
         }
@@ -231,11 +258,10 @@ roaring::Roaring QueryCalculator::CalcBRACKET() {
 }
 
 int main() {
-    InvertedIndex index{};
-    index.AddDocument(0, "aaa aaa bbb");
-    index.AddDocument(1, "aaa a aa b");
-    std::cout << RoaringBitmapToString(index.SearchWord("aaa")) << std::endl;;
-    std::cout << RoaringBitmapToString(index.SearchFormula("aaa & bbb")) << std::endl;
-    std::cout << RoaringBitmapToString(index.SearchFormula("(a | bbb) & !c & (aa | bbb)")) << std::endl;;
-    std::cout << RoaringBitmapToString(index.SearchFormula("(a | bbb) & !c & (aa | bbb) & (w | ww | www | !aaa)")) << std::endl;
+    {
+        InvertedIndex index{};
+        index.AddDocument(0, "mother father cow banana");
+        index.AddDocument(1, "cow black daddy");
+        std::cout << RoaringBitmapToString(index.SearchFormula("(cow | daddy) & !horse & (black | mother) & (father | black | banana | !cow)")) << std::endl;
+    }
 }
